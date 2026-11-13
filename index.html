@@ -10,6 +10,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <style>
     :root{
         --ink:#1e1433;
@@ -260,20 +262,21 @@
             <div class="panel-head">
                 <div>
                     <h2>Pegar o subir PDF</h2>
-                    <p>Arrastra uno o varios PDF (cada uno con su set) o pega el texto y pulsa “Procesar texto”.</p>
+                    <p>Arrastra uno o varios PDF o un Word (.docx), o pega el texto y pulsa “Procesar texto”.</p>
                 </div>
                 <span class="chip">Ctrl + Shift + V para pegar limpio</span>
             </div>
 
             <div class="drop" id="drop">
-                Arrastra aquí uno o <b>varios PDF</b> (o haz clic para elegirlos) → se extraen los jugadores de cada set.
+                Arrastra aquí uno o <b>varios PDF</b> o un <b>Word (.docx)</b> → se extraen los jugadores de cada set.
             </div>
-            <input type="file" id="archivo" accept="application/pdf" multiple hidden>
+            <input type="file" id="archivo" accept=".pdf,.docx" multiple hidden>
 
             <textarea id="texto" placeholder="Pega aquí desde Word (Ctrl+Shift+V)…&#10;Ejemplo:&#10;JUAN PEREZ   23   YM   1   BLANCO   A"></textarea>
 
             <div class="acciones">
                 <button class="btn btn-verde" id="btnProcesar">Procesar texto</button>
+                <button class="btn btn-azul" id="btnWord">Convertir a Word</button>
                 <button class="btn btn-rojo" id="btnLimpiar">Borrar</button>
             </div>
 
@@ -328,8 +331,8 @@
                 </div>
             </div>
             <div class="resumen" style="line-height:1.9;font-size:12px">
-                1. Pega desde Word con <b>Ctrl+Shift+V</b> (o arrastra uno o varios PDF).<br>
-                2. Con PDF, los jugadores se extraen <b>solos</b> (cada set queda separado). Si pegas texto, pulsa <b>Procesar texto</b>.<br>
+                1. Pega desde Word con <b>Ctrl+Shift+V</b>, o arrastra <b>PDF / .docx</b>.<br>
+                2. Los jugadores se extraen <b>solos</b> (cada set queda separado). Si el PDF no se deja leer, conviértelo a Word y súbelo.<br>
                 3. Usa <b>MAYÚSCULAS</b> o <b>Primera Letra Mayúscula</b> para normalizar nombres.<br>
                 4. Revisa <b>Números repetidos</b> y descarga en <b>Excel</b> o CSV.
             </div>
@@ -675,6 +678,67 @@ function descargar(nombre, contenido, tipo) {
     setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 
+/* ---------- Convertir el PDF subido a Word (.docx) ---------- */
+async function convertirAWord() {
+    if (typeof docx === 'undefined') { aviso('No se pudo cargar el generador de Word (revisa internet).', 'alerta'); return; }
+
+    const texto = (textoPdf || $('texto').value || '').trim();
+    if (!texto && !filas.length) { aviso('Primero sube un PDF o pega el texto.', 'alerta'); return; }
+
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx;
+    const hijos = [];
+    hijos.push(new Paragraph({ text: 'Roster', heading: HeadingLevel.HEADING_1 }));
+    hijos.push(new Paragraph({ children: [new TextRun({ text: 'SO: ' + (normalizarSo($('soOrden').value) || '—'), size: 20 })] }));
+
+    if (filas.length) {
+        const grupos = {};
+        filas.forEach(f => {
+            const s = String(f.set || '').toUpperCase();
+            if (!grupos[s]) grupos[s] = [];
+            grupos[s].push(f);
+        });
+        Object.keys(grupos).sort().forEach(set => {
+            hijos.push(new Paragraph({ text: set ? 'SET ' + set : 'Jugadores', heading: HeadingLevel.HEADING_2 }));
+            hijos.push(tablaDocx(grupos[set]));
+            hijos.push(new Paragraph({ text: '' }));
+        });
+    }
+
+    if (texto) {
+        hijos.push(new Paragraph({ text: 'Texto del PDF', heading: HeadingLevel.HEADING_2 }));
+        texto.split(/\r?\n/).filter(l => l.trim()).forEach(l => hijos.push(new Paragraph({
+            children: [new TextRun({ text: l, font: 'Arial', size: 20 })]
+        })));
+    }
+
+    const doc = new Document({ sections: [{ children: hijos }] });
+    const blob = await Packer.toBlob(doc);
+    descargarBlob(nombreRoster('docx'), blob);
+    aviso('Word (.docx) descargado.', 'ok');
+}
+
+function tablaDocx(rows) {
+    const { Paragraph, TextRun, Table, TableRow, TableCell, WidthType } = docx;
+    const filasTabla = [
+        new TableRow({
+            tableHeader: true,
+            children: CAMPOS.map(c => new TableCell({
+                children: [new Paragraph({ children: [new TextRun({ text: etiqueta(c), bold: true, size: 18 })] })]
+            }))
+        })
+    ];
+    rows.forEach(f => {
+        filasTabla.push(new TableRow({
+            children: CAMPOS.map(c => new TableCell({
+                children: [new Paragraph({ children: [new TextRun({ text: String(f[c] == null ? '' : f[c]), size: 18 })] })]
+            }))
+        }));
+    });
+    return new Table({ rows: filasTabla, width: { size: 100, type: WidthType.PERCENTAGE } });
+}
+
+$('btnWord').addEventListener('click', convertirAWord);
+
 /* ---------- Excel (.xlsx) con una hoja por set ---------- */
 function descargarExcel() {
     if (typeof XLSX === 'undefined') { aviso('No se pudo cargar el generador de Excel (revisa internet).', 'alerta'); return; }
@@ -746,10 +810,10 @@ async function leerPdfs(files) {
     if (typeof pdfjsLib === 'undefined') { aviso('No se pudo cargar el lector de PDF (revisa internet).', 'alerta'); return; }
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
-    const lista = Array.from(files).filter(f => /\.pdf$/i.test(f.name));
-    if (!lista.length) { aviso('Suelta archivos PDF.', 'alerta'); return; }
+    const lista = Array.from(files).filter(f => /\.(pdf|docx)$/i.test(f.name));
+    if (!lista.length) { aviso('Suelta archivos PDF o Word (.docx).', 'alerta'); return; }
 
-    aviso('Leyendo ' + lista.length + ' PDF(s)…');
+    aviso('Leyendo ' + lista.length + ' archivo(s)…');
     let total = 0;
     const resumen = [];
 
@@ -758,9 +822,21 @@ async function leerPdfs(files) {
         const so = detectarSo(archivo.name) || '';
         if (so) { $('soOrden').value = so; guardarSo(); }
 
+        const esDocx = /\.docx$/i.test(archivo.name);
+
         try {
-            const bytes = await archivo.arrayBuffer();
-            const paginas = await textoDePdf(bytes);
+            let paginas;
+
+            if (esDocx) {
+                if (typeof mammoth === 'undefined') throw new Error('no se pudo cargar el lector de Word');
+                const buf = await archivo.arrayBuffer();
+                const res = await mammoth.extractRawText({ arrayBuffer: buf });
+                paginas = [String(res.value || '')];
+            } else {
+                const bytes = await archivo.arrayBuffer();
+                paginas = await textoDePdf(bytes);
+            }
+
             textoPdf += (textoPdf ? '\n\n' : '') + '=== ' + archivo.name + ' ===\n' + paginas.join('\n\n');
 
             let nPdf = 0;
@@ -773,7 +849,7 @@ async function leerPdfs(files) {
             });
 
             total += nPdf;
-            resumen.push(archivo.name + ': ' + nPdf + ' fila(s)');
+            resumen.push(archivo.name + ': ' + nPdf + ' fila(s)' + (!nPdf && !esDocx ? ' (no se pudo leer el roster)' : ''));
         } catch (e) {
             resumen.push(archivo.name + ': error (' + e.message + ')');
         }
@@ -796,8 +872,8 @@ async function leerPdfs(files) {
     });
 
     render();
-    aviso(total ? 'PDF(s): ' + lista.length + ' · ' + total + ' jugadores · ' + resumen.join(' | ')
-                : 'No se encontraron jugadores en los PDFs: ' + resumen.join(' | '),
+    aviso(total ? 'Archivo(s): ' + lista.length + ' · ' + total + ' jugadores · ' + resumen.join(' | ')
+                : 'No se encontraron jugadores. Si el PDF no se deja leer, conviértelo a Word (.docx) y súbelo aquí. Detalle: ' + resumen.join(' | '),
           total ? 'ok' : 'alerta');
     if (total) $('tabla').scrollIntoView({ behavior: 'smooth' });
 }
