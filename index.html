@@ -10,7 +10,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <style>
     :root{
         --ink:#1e1433;
@@ -261,21 +260,20 @@
             <div class="panel-head">
                 <div>
                     <h2>Pegar o subir PDF</h2>
-                    <p>Arrastra un PDF o pega el texto. Luego pulsa “Procesar texto”.</p>
+                    <p>Arrastra uno o varios PDF (cada uno con su set) o pega el texto y pulsa “Procesar texto”.</p>
                 </div>
                 <span class="chip">Ctrl + Shift + V para pegar limpio</span>
             </div>
 
             <div class="drop" id="drop">
-                Arrastra aquí un <b>PDF</b> (o haz clic) → se extrae el texto y se puede convertir a Word.
+                Arrastra aquí uno o <b>varios PDF</b> (o haz clic para elegirlos) → se extraen los jugadores de cada set.
             </div>
-            <input type="file" id="archivo" accept="application/pdf" hidden>
+            <input type="file" id="archivo" accept="application/pdf" multiple hidden>
 
             <textarea id="texto" placeholder="Pega aquí desde Word (Ctrl+Shift+V)…&#10;Ejemplo:&#10;JUAN PEREZ   23   YM   1   BLANCO   A"></textarea>
 
             <div class="acciones">
                 <button class="btn btn-verde" id="btnProcesar">Procesar texto</button>
-                <button class="btn btn-azul" id="btnWordPegado">PDF → Word</button>
                 <button class="btn btn-rojo" id="btnLimpiar">Borrar</button>
             </div>
 
@@ -330,8 +328,8 @@
                 </div>
             </div>
             <div class="resumen" style="line-height:1.9;font-size:12px">
-                1. Pega desde Word con <b>Ctrl+Shift+V</b> (o arrastra un PDF).<br>
-                2. Pulsa <b>Procesar texto</b> y revisa la tabla: nombre, número, talla, cantidad, set.<br>
+                1. Pega desde Word con <b>Ctrl+Shift+V</b> (o arrastra uno o varios PDF).<br>
+                2. Con PDF, los jugadores se extraen <b>solos</b> (cada set queda separado). Si pegas texto, pulsa <b>Procesar texto</b>.<br>
                 3. Usa <b>MAYÚSCULAS</b> o <b>Primera Letra Mayúscula</b> para normalizar nombres.<br>
                 4. Revisa <b>Números repetidos</b> y descarga en <b>Excel</b> o CSV.
             </div>
@@ -381,8 +379,12 @@ function etiqueta(c) {
 
 function contarRepetidos() {
     const cuenta = {};
-    filas.forEach(f => { if (f.numero) cuenta[f.numero] = (cuenta[f.numero] || 0) + 1; });
-    return Object.keys(cuenta).filter(n => cuenta[n] > 1);
+    filas.forEach(f => {
+        if (!f.numero) return;
+        const k = String(f.set || '').toUpperCase() + '|' + f.numero;
+        cuenta[k] = (cuenta[k] || 0) + 1;
+    });
+    return Object.keys(cuenta).filter(k => cuenta[k] > 1);
 }
 
 function render() {
@@ -397,11 +399,11 @@ function render() {
 
         const tr = document.createElement('tr');
         tr.dataset.i = i;
-        if (f.numero && rep.indexOf(f.numero) >= 0) tr.className = 'repetido';
+        if (f.numero && rep.indexOf(String(f.set || '').toUpperCase() + '|' + f.numero) >= 0) tr.className = 'repetido';
         tr.innerHTML =
             '<td class="idx">' + (i + 1) + '</td>' +
             CAMPOS.map(c => '<td class="' + ((c === 'numero' || c === 'cantidad') ? 'num' : '') + '">' +
-                '<input data-campo="' + c + '" value="' + esc(f[c]) + '" placeholder="' + (c === 'nombre' ? 'Player name' : '') + '">' +
+                '<input data-campo="' + c + '" value="' + esc(f[c]) + '" placeholder="">' +
             '</td>').join('') +
             '<td><button class="quitar" title="Quitar fila">✕</button></td>';
         cuerpo.appendChild(tr);
@@ -444,7 +446,7 @@ $('cuerpo').addEventListener('input', ev => {
     filas[i][inp.dataset.campo] = inp.value;
     const rep = contarRepetidos();
     const tr = inp.closest('tr');
-    tr.classList.toggle('repetido', !!filas[i].numero && rep.indexOf(filas[i].numero) >= 0);
+    tr.classList.toggle('repetido', !!filas[i].numero && rep.indexOf(String(filas[i].set || '').toUpperCase() + '|' + filas[i].numero) >= 0);
     actualizarStats();
     guardar();
 });
@@ -509,7 +511,11 @@ $('btnCopiar').addEventListener('click', async () => {
 $('btnRepetidos').addEventListener('click', () => {
     const rep = contarRepetidos();
     render();
-    aviso(rep.length ? 'Números repetidos: ' + rep.join(', ') : 'No hay números repetidos.', rep.length ? 'alerta' : 'ok');
+    const lista = rep.map(k => {
+        const [s, n] = k.split('|');
+        return n + (s ? ' (set ' + s + ')' : '');
+    });
+    aviso(lista.length ? 'Números repetidos: ' + lista.join(', ') : 'No hay números repetidos.', lista.length ? 'alerta' : 'ok');
     $('tabla').scrollIntoView({ behavior: 'smooth' });
 });
 
@@ -529,10 +535,18 @@ function esTalla(t) {
     return TALLAS.indexOf(String(t).toUpperCase()) >= 0;
 }
 
-/* Lee la tabla del roster: NOMBRE · NÚMERO · TALLA · CANTIDAD [SET] */
+/* Set de una página: busca "SO-3985522/ A" o "SET B" */
+function setDePagina(texto) {
+    const t = String(texto || '');
+    const m1 = t.match(/SO[-\s]*\d{5,}\s*\/\s*([A-Z])\b/i);
+    if (m1) return m1[1].toUpperCase();
+    const m2 = t.match(/(?:^|\n)\s*SET\s*[-:#]?\s*([A-Z])\s*(?:\n|$)/i);
+    if (m2) return m2[1].toUpperCase();
+    return '';
+}
+
 function parsearRoster(texto) {
-    const t = String(texto);
-    const lineas = t.split(/\r?\n/).map(limpiarLinea).filter(Boolean);
+    const lineas = String(texto).split(/\r?\n/).map(limpiarLinea).filter(Boolean);
     const filas = [];
     const sobrantes = [];
     let setActual = '';
@@ -543,32 +557,39 @@ function parsearRoster(texto) {
 
         if (/^roster$/i.test(l)) continue;
         if (/player name|jersey quantities|^total\b|^youth\b|^adult\b|all roster information/i.test(l)) continue;
-        if (/location:|colou?rs?:|font:|size:|approx|image:|label tag|notes?|p:\s*\d|www\.|^\d{1,2}:\d{2}/i.test(l)) continue;
+        if (/location:|colou?rs?:|font:|approx|image:|label tag|notes?|p:\s*\d|www\.|^\d{1,2}:\d{2}/i.test(l)) continue;
+        if (/^SO[-\s:]/i.test(l) || /^SO\/P/i.test(l)) continue;
 
-        // NOMBRE NÚMERO TALLA CANTIDAD [SET]
-        let m = l.match(/^(.+?)\s+(\d{1,3})\s+([A-Za-z0-9]{1,4})\s+(\d{1,3})(?:\s+([A-Za-z]))?$/);
+        // 1) Fila al final de la línea: NÚMERO · YOUTH/ADULT · TALLA · CANTIDAD
+        //    (puede venir con una etiqueta delante: "LINER: N/A 3 ADULT S 1")
+        let m = l.match(/(?:^|\s)(\d{1,3})\s+(youth|adult)\s+([a-z0-9]{1,4})\s+(\d{1,3})$/i);
         if (m && esTalla(m[3])) {
-            const talla = m[3].toUpperCase();
-            const youth = talla.charAt(0) === 'Y';
+            const prefijo = l.slice(0, m.index).trim();
+            const nombre = (prefijo && prefijo.indexOf(':') < 0 && /^[A-Za-zÁÉÍÓÚÑáéíóúñ .'\-]+$/.test(prefijo)) ? prefijo : '';
             filas.push(nuevaFila({
-                nombre: m[1].trim(),
-                numero: m[2],
-                talla: youth ? talla.slice(1) : talla,
-                cantidad: m[4],
-                config: youth ? 'YOUTH' : 'ADULT',
-                set: m[5] ? m[5].toUpperCase() : setActual
+                nombre: nombre, numero: m[1], config: m[2].toUpperCase(),
+                talla: m[3].toUpperCase(), cantidad: m[4], set: setActual
             }));
             continue;
         }
 
-        // NOMBRE NÚMERO CANTIDAD (roster sin talla)
-        m = l.match(/^(.+?)\s+(\d{1,3})\s+(\d{1,3})$/);
-        if (m) {
-            filas.push(nuevaFila({ nombre: m[1].trim(), numero: m[2], cantidad: m[3] }));
+        // 2) NOMBRE · NÚMERO [· CONFIG] · TALLA · CANTIDAD [· SET]  (el nombre debe ser solo letras)
+        m = l.match(/^(.+?)\s+(\d{1,3})\s+(?:(youth|adult)\s+)?([a-z0-9]{1,4})\s+(\d{1,3})(?:\s+([a-z]))?$/i);
+        if (m && esTalla(m[4]) && /^[A-Za-zÁÉÍÓÚÑáéíóúñ .'\-]+$/.test(m[1].trim())) {
+            const talla = m[4].toUpperCase();
+            const youth = talla.charAt(0) === 'Y';
+            filas.push(nuevaFila({
+                nombre: m[1].trim(),
+                numero: m[2],
+                config: m[3] ? m[3].toUpperCase() : (youth ? 'YOUTH' : 'ADULT'),
+                talla: youth ? talla.slice(1) : talla,
+                cantidad: m[5],
+                set: m[6] ? m[6].toUpperCase() : setActual
+            }));
             continue;
         }
 
-        if (/\d/.test(l)) {
+        if (/\d/.test(l) && l.indexOf(':') < 0) {
             const tokens = l.split(/\s+/);
             const soloTallas = tokens.every(t => esTalla(t) || /^total$/i.test(t));
             if (!soloTallas) sobrantes.push(l);
@@ -661,8 +682,9 @@ function descargarExcel() {
 
     const wb = XLSX.utils.book_new();
     const grupos = {};
+    const haySets = filas.some(f => String(f.set || '').trim());
     filas.forEach(f => {
-        const set = (String(f.set || 'A').trim().toUpperCase()) || 'A';
+        const set = (String(f.set || '').trim().toUpperCase()) || (haySets ? 'SIN SET' : 'A');
         if (!grupos[set]) grupos[set] = [];
         grupos[set].push(f);
     });
@@ -697,105 +719,92 @@ function descargarBlob(nombre, blob) {
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-/* Word real (.docx) con el generador "docx" */
-async function descargarWord(conTabla, conTexto) {
-    if (typeof docx === 'undefined') {
-        aviso('No se pudo cargar el generador de Word (revisa internet y reintenta).', 'alerta');
-        return;
-    }
-    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, HeadingLevel } = docx;
-
-    const hijos = [];
-    hijos.push(new Paragraph({ text: 'Roster', heading: HeadingLevel.HEADING_1 }));
-    hijos.push(new Paragraph({ children: [new TextRun({ text: 'SO: ' + (normalizarSo($('soOrden').value) || '—'), size: 20 })] }));
-
-    if (conTabla && filas.length) {
-        const filasTabla = [
-            new TableRow({
-                tableHeader: true,
-                children: CAMPOS.map(c => new TableCell({
-                    children: [new Paragraph({ children: [new TextRun({ text: etiqueta(c), bold: true, size: 18 })] })]
-                }))
-            })
-        ];
-        filas.forEach(f => {
-            filasTabla.push(new TableRow({
-                children: CAMPOS.map(c => new TableCell({
-                    children: [new Paragraph({ children: [new TextRun({ text: String(f[c] == null ? '' : f[c]), size: 18 })] })]
-                }))
-            }));
-        });
-        hijos.push(new Table({
-            rows: filasTabla,
-            width: { size: 100, type: WidthType.PERCENTAGE }
-        }));
-        hijos.push(new Paragraph({ text: '' }));
-    }
-
-    if (conTexto) {
-        const lineas = String($('texto').value || '').split(/\r?\n/).filter(l => l.trim());
-        lineas.forEach(l => hijos.push(new Paragraph({
-            children: [new TextRun({ text: l, font: 'Arial', size: 20 })]
-        })));
-    }
-
-    if (!conTabla && !conTexto) { aviso('No hay nada para convertir.', 'alerta'); return; }
-
-    const doc = new Document({ sections: [{ children: hijos }] });
-    const blob = await Packer.toBlob(doc);
-    descargarBlob(nombreRoster('docx'), blob);
-    aviso('Word (.docx) descargado.', 'ok');
-}
-
 $('navExcel').addEventListener('click', ev => { ev.preventDefault(); $('btnExcel').click(); });
 $('navCopiar').addEventListener('click', ev => { ev.preventDefault(); $('btnCopiar').click(); });
 
-/* PDF/texto -> Word (.docx): incluye el texto extraído y la tabla si ya se procesó */
-$('btnWordPegado').addEventListener('click', () => {
-    const texto = $('texto').value.trim();
-    if (!texto && !filas.length) { aviso('Sube un PDF o pega el texto primero.', 'alerta'); return; }
-    descargarWord(filas.length > 0, texto.length > 0);
-});
-
-/* ---------- PDF ---------- */
+/* ---------- PDF (uno o varios, cada uno con su set) ---------- */
 const drop = $('drop');
 const inputArchivo = $('archivo');
+let textoPdf = '';
+
 drop.addEventListener('click', () => inputArchivo.click());
-inputArchivo.addEventListener('change', () => { if (inputArchivo.files[0]) leerPdf(inputArchivo.files[0]); });
+inputArchivo.addEventListener('change', () => { if (inputArchivo.files.length) leerPdfs(inputArchivo.files); });
 ['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('hover'); }));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('hover'); }));
 drop.addEventListener('drop', ev => {
-    const f = ev.dataTransfer.files && ev.dataTransfer.files[0];
-    if (f) leerPdf(f);
+    const files = ev.dataTransfer.files;
+    if (files && files.length) leerPdfs(files);
 });
 
-async function leerPdf(archivo) {
+/* Letra del set desde el nombre: SO3985522A-... -> A */
+function setDeArchivo(nombre) {
+    const m = String(nombre || '').match(/SO\s*-?\s*\d{5,}\s*([A-Z])\b/i);
+    return m ? m[1].toUpperCase() : '';
+}
+
+async function leerPdfs(files) {
     if (typeof pdfjsLib === 'undefined') { aviso('No se pudo cargar el lector de PDF (revisa internet).', 'alerta'); return; }
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-    aviso('Leyendo PDF…');
-    try {
-        const soNombre = detectarSo(archivo.name);
-        if (soNombre) { $('soOrden').value = soNombre; guardarSo(); }
 
-        const bytes = await archivo.arrayBuffer();
-        const texto = await textoDePdf(bytes);
-        $('texto').value = texto;
+    const lista = Array.from(files).filter(f => /\.pdf$/i.test(f.name));
+    if (!lista.length) { aviso('Suelta archivos PDF.', 'alerta'); return; }
 
-        if (!normalizarSo($('soOrden').value)) {
-            const soTexto = detectarSo(texto);
-            if (soTexto) { $('soOrden').value = soTexto; guardarSo(); }
+    aviso('Leyendo ' + lista.length + ' PDF(s)…');
+    let total = 0;
+    const resumen = [];
+
+    for (const archivo of lista) {
+        const setPdf = setDeArchivo(archivo.name);
+        const so = detectarSo(archivo.name) || '';
+        if (so) { $('soOrden').value = so; guardarSo(); }
+
+        try {
+            const bytes = await archivo.arrayBuffer();
+            const paginas = await textoDePdf(bytes);
+            textoPdf += (textoPdf ? '\n\n' : '') + '=== ' + archivo.name + ' ===\n' + paginas.join('\n\n');
+
+            let nPdf = 0;
+            paginas.forEach(tp => {
+                const setPag = setDePagina(tp) || setPdf;
+                const r = parsearRoster(tp);
+                r.filas.forEach(f => { if (!f.set) f.set = setPag; });
+                filas = filas.concat(r.filas);
+                nPdf += r.filas.length;
+            });
+
+            total += nPdf;
+            resumen.push(archivo.name + ': ' + nPdf + ' fila(s)');
+        } catch (e) {
+            resumen.push(archivo.name + ': error (' + e.message + ')');
         }
-
-        $('pegar').scrollIntoView({ behavior: 'smooth' });
-        aviso('PDF leído: ' + texto.split(/\n/).filter(Boolean).length + ' líneas. Revisa y pulsa “Procesar texto”.', 'ok');
-    } catch (e) {
-        aviso('No se pudo leer el PDF: ' + e.message, 'alerta');
     }
+
+    // Quitar filas idénticas (si dos PDFs traen el mismo set)
+    const vistos = {};
+    filas = filas.filter(f => {
+        const k = [f.set, f.numero, f.talla, f.config, f.cantidad, f.nombre].join('|');
+        if (vistos[k]) return false;
+        vistos[k] = 1;
+        return true;
+    });
+
+    // Ordenar por set y número para que no se mezclen
+    filas.sort((a, b) => {
+        const sa = String(a.set || '').toUpperCase(), sb = String(b.set || '').toUpperCase();
+        if (sa !== sb) return sa < sb ? -1 : 1;
+        return (parseInt(a.numero, 10) || 0) - (parseInt(b.numero, 10) || 0);
+    });
+
+    render();
+    aviso(total ? 'PDF(s): ' + lista.length + ' · ' + total + ' jugadores · ' + resumen.join(' | ')
+                : 'No se encontraron jugadores en los PDFs: ' + resumen.join(' | '),
+          total ? 'ok' : 'alerta');
+    if (total) $('tabla').scrollIntoView({ behavior: 'smooth' });
 }
 
 async function textoDePdf(bytes) {
     const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
-    const lineas = [];
+    const paginas = [];
     for (let p = 1; p <= doc.numPages; p++) {
         const page = await doc.getPage(p);
         const content = await page.getTextContent();
@@ -806,14 +815,16 @@ async function textoDePdf(bytes) {
             if (!porY.has(y)) porY.set(y, []);
             porY.get(y).push({ x: it.transform[4], s: it.str });
         });
+        const lineas = [];
         Array.from(porY.keys()).sort((a, b) => b - a).forEach(y => {
             const fila = porY.get(y).sort((a, b) => a.x - b.x).map(o => o.s).join(' ');
             const limpia = fila.replace(/\s+/g, ' ').trim();
             if (limpia) lineas.push(limpia);
         });
+        paginas.push(lineas.join('\n'));
     }
     await doc.destroy();
-    return lineas.join('\n');
+    return paginas;
 }
 
 /* ---------- guardar ---------- */
