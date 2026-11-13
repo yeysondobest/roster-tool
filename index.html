@@ -62,7 +62,7 @@
         backdrop-filter:blur(18px) saturate(150%);
         -webkit-backdrop-filter:blur(18px) saturate(150%);
     }
-    .shell{max-width:1560px;margin:0 auto;padding:18px;display:grid;grid-template-columns:250px minmax(0,1fr);gap:16px;align-items:start}
+    .shell{max-width:1560px;margin:0 auto;padding:18px;display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:start}
     .main{min-width:0}
     /* ── Sidebar ─────────────────────────────────────────── */
     .sidebar{position:sticky;top:18px;height:calc(100vh - 36px);padding:18px 14px;display:flex;flex-direction:column;gap:6px}
@@ -137,6 +137,7 @@
     tbody td{padding:5px 7px;border-bottom:1px solid rgba(46,16,80,.06)}
     tbody tr:hover td{background:rgba(255,255,255,.65)}
     tbody tr.repetido td{background:rgba(254,226,226,.65)}
+    .fila-vacia td{text-align:center;color:var(--muted);padding:28px 12px;font-size:12.5px}
     td.num input{text-align:center;font-variant-numeric:tabular-nums}
     td input{width:100%;border:1px solid transparent;background:transparent;padding:8px;border-radius:9px;font:inherit;font-size:12px;color:var(--ink)}
     td input:focus{outline:none;border-color:#c4b5fd;background:#fff;box-shadow:0 0 0 3px rgba(139,92,246,.14)}
@@ -159,7 +160,7 @@
         100%{box-shadow:0 0 0 16px rgba(124,58,237,0), var(--shadow)}
     }
     .panel.flash{animation:flashPanel 1.1s ease-out 1}
-    @media (max-width:1180px){ .shell{grid-template-columns:minmax(0,1fr)} .sidebar{display:none} section[id]{scroll-margin-top:16px} }
+    @media (max-width:940px){ .shell{grid-template-columns:minmax(0,1fr)} .sidebar{display:none} section[id]{scroll-margin-top:16px} }
     @media (max-width:760px){
         body{padding:10px}
         .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -332,7 +333,7 @@
                 1. Pega desde Word con <b>Ctrl+Shift+V</b> (o arrastra un PDF).<br>
                 2. Pulsa <b>Procesar texto</b> y revisa la tabla: nombre, número, talla, cantidad, set.<br>
                 3. Usa <b>MAYÚSCULAS</b> o <b>Primera Letra Mayúscula</b> para normalizar nombres.<br>
-                4. Revisa <b>Números repetidos</b> y descarga en <b>CSV</b> o <b>Word</b>.
+                4. Revisa <b>Números repetidos</b> y descarga en <b>Excel</b> o CSV.
             </div>
         </section>
 
@@ -408,6 +409,13 @@ function render() {
 
     const numeros = filas.map(f => f.numero).filter(Boolean);
     const sets = new Set(filas.map(f => f.set).filter(Boolean));
+
+    if (!cuerpo.children.length) {
+        const tr = document.createElement('tr');
+        tr.className = 'fila-vacia';
+        tr.innerHTML = '<td colspan="9">Aún no hay jugadores. Pega el roster, sube un PDF o usa “+ Fila”.</td>';
+        cuerpo.appendChild(tr);
+    }
 
     $('kFilas').textContent = filas.length;
     $('kNumeros').textContent = new Set(numeros).size;
@@ -856,13 +864,13 @@ window.addEventListener('resize', navActivo);
 /* ---------- inicio ---------- */
 cargar();
 try { const soGuardado = localStorage.getItem('roster-so'); if (soGuardado) $('soOrden').value = soGuardado; } catch (e) {}
-if (!filas.length) {
-    filas = [
-        nuevaFila({ nombre: 'YEISON MORROBEL', numero: '23', year: '2026', cantidad: '1', config: 'BLANCO', talla: 'YM', set: 'A' }),
-        nuevaFila({ nombre: 'JUAN PEREZ', numero: '10', year: '2026', cantidad: '2', config: 'NEGRO', talla: 'AL', set: 'A' }),
-        nuevaFila({ nombre: 'CARLOS RUIZ', numero: '7', year: '2026', cantidad: '1', config: 'VERDE', talla: 'AM', set: 'B' })
-    ];
+
+// Si quedaron las filas de ejemplo de una versión anterior, se limpian al abrir
+const DEMO = ['YEISON MORROBEL|23', 'JUAN PEREZ|10', 'CARLOS RUIZ|7'];
+if (filas.length === 3 && filas.every(f => DEMO.indexOf(String(f.nombre || '').toUpperCase() + '|' + f.numero) >= 0)) {
+    filas = [];
 }
+
 render();
 navActivo();
 </script>
